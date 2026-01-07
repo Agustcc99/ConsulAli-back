@@ -339,9 +339,13 @@ export const obtenerReporteDiario = async (req, res) => {
     }
 
     const totalGastosDia = gastosDelDia.reduce((acc, g) => acc + (g.monto || 0), 0);
+
     const totalPagadoLaboratorioDia = gastosDelDia
       .filter((g) => g.tipo === "laboratorio")
       .reduce((acc, g) => acc + (g.monto || 0), 0);
+
+    // Laboratorio comprometido del día (según regla C: gastos de laboratorio del día)
+    const laboratorioComprometidoDia = totalPagadoLaboratorioDia;
 
     // 2) tratamientos relevantes del día (pagos o gastos del día)
     const idsTratamientos = new Set();
@@ -363,6 +367,9 @@ export const obtenerReporteDiario = async (req, res) => {
         },
         separacionDelDia: {
           paraLaboratorio: 0,
+          laboratorioCubiertoPorPagos: 0,
+          laboratorioPendiente: 0,
+
           paraMama: 0,
           paraAlicia: 0,
           excedente: 0,
@@ -387,7 +394,7 @@ export const obtenerReporteDiario = async (req, res) => {
       });
     }
 
-    // 3) Foto cierre: para que sea "al cierre del día", tomamos pagos/gastos HASTA finDiaExclusivo (no t0do histórico)
+    // 3) Foto cierre: para que sea "al cierre del día", tomamos pagos/gastos HASTA finDiaExclusivo
     const [tratamientos, pagosHastaCierreDia, gastosHastaCierreDia] = await Promise.all([
       Tratamiento.find({ _id: { $in: ids } }).populate("pacienteId").sort({ fechaInicio: -1 }),
       Pago.find({ tratamientoId: { $in: ids }, fecha: { $lt: finDiaExclusivo } }).sort({ fecha: 1 }),
@@ -408,8 +415,8 @@ export const obtenerReporteDiario = async (req, res) => {
       gastosPorTratamiento.get(clave).push(gasto);
     }
 
-    // Totales de separación del día (lo que tu mamá quiere "separar" HOY según lo cobrado hoy)
-    let paraLaboratorio = 0;
+    // Separación por pagos del día (waterfall)
+    let paraLaboratorioPorPagos = 0;
     let paraMama = 0;
     let paraAlicia = 0;
     let excedente = 0;
@@ -441,10 +448,8 @@ export const obtenerReporteDiario = async (req, res) => {
 
       const resumenFinanciero = calcularDistribucionFija(tratamiento.toObject(), gastosT, pagosT);
 
-      // Asignación por pago (sobre el historial hasta cierre del día)
       const asignacionPorPago = construirAsignacionPorPago(pagosT, resumenFinanciero.objetivo);
 
-      // Pagos del día, con asignación (esto es lo “separar en el momento”)
       const pagosDeEsteDia = pagosT
         .filter((p) => estaEnRango(p.fecha, inicioDia, finDiaExclusivo))
         .map((p) => {
@@ -455,7 +460,7 @@ export const obtenerReporteDiario = async (req, res) => {
             excedente: 0,
           };
 
-          paraLaboratorio += asg.paraLab;
+          paraLaboratorioPorPagos += asg.paraLab;
           paraMama += asg.paraMama;
           paraAlicia += asg.paraAlicia;
           excedente += asg.excedente;
@@ -473,7 +478,6 @@ export const obtenerReporteDiario = async (req, res) => {
 
       const gastosDeEsteDia = gastosT.filter((g) => estaEnRango(g.fecha, inicioDia, finDiaExclusivo));
 
-      // Foto cierre del día (para tratamientos con movimiento hoy)
       foto.totalCorrespondienteLaboratorio += resumenFinanciero.objetivo.lab;
       foto.totalCobradoLaboratorio += resumenFinanciero.pagado.lab;
       foto.totalPendienteLaboratorio += resumenFinanciero.saldo.lab;
@@ -499,6 +503,12 @@ export const obtenerReporteDiario = async (req, res) => {
       });
     }
 
+    // Nuevo significado: "paraLaboratorio" = laboratorio comprometido del día
+    const paraLaboratorio = laboratorioComprometidoDia;
+
+    const laboratorioCubiertoPorPagos = paraLaboratorioPorPagos;
+    const laboratorioPendiente = paraLaboratorio - laboratorioCubiertoPorPagos;
+
     return res.json({
       periodo: { fecha: fechaISO, desde: inicioDia, hastaExclusivo: finDiaExclusivo },
       cashflowDelDia: {
@@ -511,6 +521,9 @@ export const obtenerReporteDiario = async (req, res) => {
       },
       separacionDelDia: {
         paraLaboratorio,
+        laboratorioCubiertoPorPagos,
+        laboratorioPendiente,
+
         paraMama,
         paraAlicia,
         excedente,
