@@ -9,6 +9,9 @@ import { errorHandler } from "./src/middlewares/errorHandler.js";
 
 const app = express();
 
+// Render / proxies (necesario para express-rate-limit y req.ip)
+app.set("trust proxy", 1);
+
 app.use(helmet());
 app.use(express.json());
 app.use(cookieParser());
