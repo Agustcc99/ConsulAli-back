@@ -10,6 +10,10 @@ import {
   responderServerError,
 } from "../utils/respuestas.js";
 
+function hardDeleteHabilitado() {
+  return String(process.env.ALLOW_HARD_DELETE || "").trim() === "1";
+}
+
 // POST /api/tratamientos
 export const crearTratamiento = async (req, res) => {
   try {
@@ -69,7 +73,6 @@ export const listarTratamientos = async (req, res) => {
     if (estado) {
       filtro.estado = estado;
     } else if (!String(incluirCancelados || "").trim()) {
-      // por defecto NO mostramos los cancelados
       filtro.estado = { $ne: "cancelado" };
     }
 
@@ -187,8 +190,9 @@ export const obtenerResumenFinancieroTratamiento = async (req, res) => {
 
 /**
  * DELETE /api/tratamientos/:id?modo=cancelar|eliminar
- * - cancelar (default): estado="cancelado" (reversible si quisieras)
+ * - cancelar (default): estado="cancelado"
  * - eliminar: borra tratamiento + pagos + gastos (IRREVERSIBLE)
+ *   Requiere ALLOW_HARD_DELETE=1
  */
 export const eliminarTratamiento = async (req, res) => {
   try {
@@ -214,13 +218,19 @@ export const eliminarTratamiento = async (req, res) => {
       return responderBadRequest(res, "modo inválido. Use ?modo=cancelar o ?modo=eliminar");
     }
 
+    if (!hardDeleteHabilitado()) {
+      return res.status(403).json({
+        message: "Hard delete deshabilitado. Para habilitarlo setear ALLOW_HARD_DELETE=1 en el servidor.",
+      });
+    }
+
     await Promise.all([
       Pago.deleteMany({ tratamientoId: id }),
       Gasto.deleteMany({ tratamientoId: id }),
       Tratamiento.findByIdAndDelete(id),
     ]);
 
-    return res.json({ ok: true, modo, message: "Tratamiento eliminado definitivamente" });
+    return res.json({ ok: true, modo, message: "Tratamiento eliminado definitivamente (cascade)" });
   } catch (error) {
     return responderServerError(res, "Error al eliminar tratamiento", error);
   }
