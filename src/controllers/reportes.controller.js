@@ -91,6 +91,7 @@ function construirAsignacionPorPago(pagosOrdenados, objetivo) {
  * Reporte mensual
  * - Totales del mes por fecha de pago/gasto (cashflow)
  * - Foto de saldos al cierre del mes (sumando t0do lo ocurrido hasta fin del mes)
+ * - NUEVO: distribución del mes (waterfall) SOLO con pagos dentro del mes
  */
 export const obtenerReporteMensual = async (req, res) => {
   try {
@@ -151,6 +152,12 @@ export const obtenerReporteMensual = async (req, res) => {
 
     let saldoPendienteTotalPacientes = 0;
 
+    // ✅ NUEVO: distribución del mes (waterfall) SOLO con pagos dentro del mes
+    let cobradoLabMes = 0;
+    let cobradoMamaMes = 0;
+    let cobradoAliciaMes = 0;
+    let excedenteMes = 0;
+
     for (const tratamiento of tratamientosHastaCierre) {
       const idTrat = String(tratamiento._id);
       const pagosT = (pagosPorTratamiento.get(idTrat) || []).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
@@ -158,6 +165,7 @@ export const obtenerReporteMensual = async (req, res) => {
 
       const resumen = calcularDistribucionFija(tratamiento.toObject(), gastosT, pagosT);
 
+      // --- Foto cierre (acumulada al cierre del mes)
       totalCorrespondienteMama += resumen.objetivo.mama;
       totalCobradoMama += resumen.pagado.mama;
       totalPendienteMama += resumen.saldo.mama;
@@ -167,6 +175,21 @@ export const obtenerReporteMensual = async (req, res) => {
       totalPendienteAlicia += resumen.saldo.alicia;
 
       saldoPendienteTotalPacientes += resumen.saldo.paciente;
+
+      // --- ✅ Distribución DEL MES (solo pagos dentro del mes)
+      const asignacionPorPago = construirAsignacionPorPago(pagosT, resumen.objetivo);
+
+      for (const p of pagosT) {
+        if (!estaEnRango(p.fecha, inicioMes, finMesExclusivo)) continue;
+
+        const asg = asignacionPorPago.get(String(p._id));
+        if (!asg) continue;
+
+        cobradoLabMes += asg.paraLab || 0;
+        cobradoMamaMes += asg.paraMama || 0;
+        cobradoAliciaMes += asg.paraAlicia || 0;
+        excedenteMes += asg.excedente || 0;
+      }
     }
 
     return res.json({
@@ -183,6 +206,15 @@ export const obtenerReporteMensual = async (req, res) => {
         cantidadPagosMes: pagosDelMes.length,
         cantidadGastosMes: gastosDelMes.length,
       },
+
+      // ✅ NUEVO: lo cobrado DEL MES según waterfall (no acumulado)
+      distribucionDelMes: {
+        paraLaboratorio: cobradoLabMes,
+        paraMama: cobradoMamaMes,
+        paraAlicia: cobradoAliciaMes,
+        excedente: excedenteMes,
+      },
+
       fotoCierreMes: {
         totalCorrespondienteMama,
         totalCobradoMama,
