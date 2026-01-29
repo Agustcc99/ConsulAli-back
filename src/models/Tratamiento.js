@@ -20,10 +20,13 @@ const tratamientoSchema = new mongoose.Schema(
 
     // Montos fijos (en pesos enteros)
     precioPaciente: { type: Number, required: true, min: 0 },
-    montoMama: { type: Number, required: true, min: 0 },
-    montoAlicia: { type: Number, required: true, min: 0 },
 
-    // Cómo ajustar si precioPaciente != (labReal + mama + alicia)
+    // Ya no se necesitan para el cálculo (se calcula con lab y 70/30).
+    // Se dejan por compatibilidad / histórico, pero NO obligatorios.
+    montoMama: { type: Number, default: 0, min: 0 },
+    montoAlicia: { type: Number, default: 0, min: 0 },
+
+    // Se deja por compatibilidad (ya no afecta la cuenta nueva)
     reglaAjuste: {
       type: String,
       enum: ["mama", "alicia", "prorrateo"],

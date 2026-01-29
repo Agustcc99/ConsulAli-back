@@ -39,10 +39,13 @@ export const crearTratamiento = async (req, res) => {
     if (!esEnteroNoNegativo(precioPaciente)) {
       return responderBadRequest(res, "precioPaciente debe ser un número entero >= 0");
     }
-    if (!esEnteroNoNegativo(montoMama)) {
+
+    // ✅ Ya NO son obligatorios:
+    // Si vienen, se validan; si no vienen, se usan como 0.
+    if (montoMama !== undefined && !esEnteroNoNegativo(montoMama)) {
       return responderBadRequest(res, "montoMama debe ser un número entero >= 0");
     }
-    if (!esEnteroNoNegativo(montoAlicia)) {
+    if (montoAlicia !== undefined && !esEnteroNoNegativo(montoAlicia)) {
       return responderBadRequest(res, "montoAlicia debe ser un número entero >= 0");
     }
 
@@ -51,8 +54,8 @@ export const crearTratamiento = async (req, res) => {
       tipo,
       descripcion,
       precioPaciente,
-      montoMama,
-      montoAlicia,
+      montoMama: montoMama ?? 0,
+      montoAlicia: montoAlicia ?? 0,
       reglaAjuste,
     });
 
