@@ -4,33 +4,54 @@ import { Gasto } from "../models/Gasto.js";
 import { calcularDistribucionFija } from "../services/finanzas.service.js";
 import { responderBadRequest, responderServerError } from "../utils/respuestas.js";
 
+/**
+ * Render suele correr en UTC. Si armás rangos con new Date(año, mes, día...)
+ * el "inicio del día" queda en zona del servidor, no en Argentina.
+ *
+ * Solución: construir rangos con string ISO + offset fijo -03:00 (Argentina).
+ */
+const ZONA_HORARIA_AR = "America/Argentina/Cordoba";
+const OFFSET_AR = "-03:00";
+
+/** Devuelve YYYY-MM-DD en hora Argentina */
+function obtenerFechaISOArgentina(ahora = new Date()) {
+  // en-CA => YYYY-MM-DD
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: ZONA_HORARIA_AR,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(ahora);
+}
+
 function obtenerRangoMensual(anio, mes) {
   // mes: 1..12
-  const inicioMes = new Date(anio, mes - 1, 1, 0, 0, 0, 0);
-  const finMesExclusivo = new Date(anio, mes, 1, 0, 0, 0, 0); // primer día del mes siguiente
+  const mm = String(mes).padStart(2, "0");
+  const inicioMes = new Date(`${anio}-${mm}-01T00:00:00.000${OFFSET_AR}`);
+
+  const anioFin = mes === 12 ? anio + 1 : anio;
+  const mesFin = mes === 12 ? 1 : mes + 1;
+  const mmFin = String(mesFin).padStart(2, "0");
+  const finMesExclusivo = new Date(`${anioFin}-${mmFin}-01T00:00:00.000${OFFSET_AR}`);
+
   return { inicioMes, finMesExclusivo };
 }
 
 function obtenerRangoDiario(fechaStr) {
   // fechaStr esperado: "YYYY-MM-DD"
-  let inicioDia;
+  let fechaISO;
 
   if (fechaStr === undefined || fechaStr === null || fechaStr === "") {
-    const ahora = new Date();
-    inicioDia = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0, 0);
+    // "hoy" según Argentina (no según UTC del server)
+    fechaISO = obtenerFechaISOArgentina();
   } else {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fechaStr))) return null;
-    const [anio, mes, dia] = String(fechaStr).split("-").map(Number);
-    if (!Number.isInteger(anio) || !Number.isInteger(mes) || !Number.isInteger(dia)) return null;
-    inicioDia = new Date(anio, mes - 1, dia, 0, 0, 0, 0);
+    fechaISO = String(fechaStr);
   }
 
-  const finDiaExclusivo = new Date(inicioDia);
-  finDiaExclusivo.setDate(finDiaExclusivo.getDate() + 1);
-
-  const fechaISO = `${inicioDia.getFullYear()}-${String(inicioDia.getMonth() + 1).padStart(2, "0")}-${String(
-    inicioDia.getDate()
-  ).padStart(2, "0")}`;
+  // Midnight Argentina -> Date en UTC internamente
+  const inicioDia = new Date(`${fechaISO}T00:00:00.000${OFFSET_AR}`);
+  const finDiaExclusivo = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
 
   return { fechaISO, inicioDia, finDiaExclusivo };
 }
@@ -160,8 +181,12 @@ export const obtenerReporteMensual = async (req, res) => {
 
     for (const tratamiento of tratamientosHastaCierre) {
       const idTrat = String(tratamiento._id);
-      const pagosT = (pagosPorTratamiento.get(idTrat) || []).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-      const gastosT = (gastosPorTratamiento.get(idTrat) || []).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+      const pagosT = (pagosPorTratamiento.get(idTrat) || []).sort(
+        (a, b) => new Date(a.fecha) - new Date(b.fecha)
+      );
+      const gastosT = (gastosPorTratamiento.get(idTrat) || []).sort(
+        (a, b) => new Date(a.fecha) - new Date(b.fecha)
+      );
 
       const resumen = calcularDistribucionFija(tratamiento.toObject(), gastosT, pagosT);
 
@@ -280,8 +305,12 @@ export const obtenerPendientesMamaYAlicia = async (req, res) => {
     for (const tratamiento of tratamientosHastaCierre) {
       const idTrat = String(tratamiento._id);
 
-      const pagosT = (pagosPorTratamiento.get(idTrat) || []).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-      const gastosT = (gastosPorTratamiento.get(idTrat) || []).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+      const pagosT = (pagosPorTratamiento.get(idTrat) || []).sort(
+        (a, b) => new Date(a.fecha) - new Date(b.fecha)
+      );
+      const gastosT = (gastosPorTratamiento.get(idTrat) || []).sort(
+        (a, b) => new Date(a.fecha) - new Date(b.fecha)
+      );
 
       const resumen = calcularDistribucionFija(tratamiento.toObject(), gastosT, pagosT);
 
@@ -475,8 +504,12 @@ export const obtenerReporteDiario = async (req, res) => {
     for (const tratamiento of tratamientos) {
       const idTrat = String(tratamiento._id);
 
-      const pagosT = (pagosPorTratamiento.get(idTrat) || []).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-      const gastosT = (gastosPorTratamiento.get(idTrat) || []).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+      const pagosT = (pagosPorTratamiento.get(idTrat) || []).sort(
+        (a, b) => new Date(a.fecha) - new Date(b.fecha)
+      );
+      const gastosT = (gastosPorTratamiento.get(idTrat) || []).sort(
+        (a, b) => new Date(a.fecha) - new Date(b.fecha)
+      );
 
       const resumenFinanciero = calcularDistribucionFija(tratamiento.toObject(), gastosT, pagosT);
 
