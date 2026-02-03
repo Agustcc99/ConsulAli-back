@@ -28,7 +28,7 @@ export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
   const netoParaRepartir = Math.max(netoGanancia, 0);
 
   // 70/30 en enteros: redondeo para mamá, resto para Alicia
-  const objetivoMama = Math.round((netoParaRepartir * 68.42) / 100);
+  const objetivoMama = Math.round((netoParaRepartir * 68,42105) / 100);
   const objetivoAlicia = netoParaRepartir - objetivoMama;
 
   const objetivoLab = labReal;
