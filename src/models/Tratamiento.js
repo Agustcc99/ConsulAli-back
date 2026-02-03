@@ -21,10 +21,34 @@ const tratamientoSchema = new mongoose.Schema(
     // Montos fijos (en pesos enteros)
     precioPaciente: { type: Number, required: true, min: 0 },
 
-    // Ya no se necesitan para el cálculo (se calcula con lab y 70/30).
-    // Se dejan por compatibilidad / histórico, pero NO obligatorios.
+    /**
+     * Compat / histórico:
+     * - Si modoDistribucion = "manual": estos montos SON la verdad (snapshot)
+     * - Si modoDistribucion = "auto": pueden quedar en 0 o como referencia, pero no son la fuente del cálculo.
+     */
     montoMama: { type: Number, default: 0, min: 0 },
     montoAlicia: { type: Number, default: 0, min: 0 },
+
+    /**
+     * NUEVO: modo de distribución
+     * - manual: usar montoMama/montoAlicia tal cual están guardados
+     * - auto: calcular con porcentaje "congelado" (porcentajeMamaUsado/porcentajeAliciaUsado)
+     *
+     * Default "auto" para mantener el comportamiento actual.
+     */
+    modoDistribucion: {
+      type: String,
+      enum: ["auto", "manual"],
+      default: "auto",
+      index: true,
+    },
+
+    /**
+     * NUEVO: snapshot de porcentajes usados (para que cambios futuros no afecten el pasado)
+     * Se aplican sobre el NETO (precioPaciente - labReal), como ya venías haciendo.
+     */
+    porcentajeMamaUsado: { type: Number, min: 0, max: 100 },
+    porcentajeAliciaUsado: { type: Number, min: 0, max: 100 },
 
     // Se deja por compatibilidad (ya no afecta la cuenta nueva)
     reglaAjuste: {

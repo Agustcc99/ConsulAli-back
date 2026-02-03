@@ -14,6 +14,22 @@ function hardDeleteHabilitado() {
   return String(process.env.ALLOW_HARD_DELETE || "").trim() === "1";
 }
 
+/**
+ * Por ahora dejamos defaults para NO romper nada.
+ * Cuando conectemos tu "API de finanzas", acá vas a buscar el porcentaje vigente.
+ */
+function obtenerPorcentajesVigentesFallback() {
+  // El que venías usando como base
+  const porcentajeMama = 68.42105;
+  const porcentajeAlicia = 100 - porcentajeMama;
+
+  return { porcentajeMama, porcentajeAlicia };
+}
+
+async function tienePagosAsociados(tratamientoId) {
+  return !!(await Pago.exists({ tratamientoId }));
+}
+
 // POST /api/tratamientos
 export const crearTratamiento = async (req, res) => {
   try {
@@ -40,8 +56,7 @@ export const crearTratamiento = async (req, res) => {
       return responderBadRequest(res, "precioPaciente debe ser un número entero >= 0");
     }
 
-    // ✅ Ya NO son obligatorios:
-    // Si vienen, se validan; si no vienen, se usan como 0.
+    // Si vienen montos, los validamos.
     if (montoMama !== undefined && !esEnteroNoNegativo(montoMama)) {
       return responderBadRequest(res, "montoMama debe ser un número entero >= 0");
     }
@@ -49,15 +64,31 @@ export const crearTratamiento = async (req, res) => {
       return responderBadRequest(res, "montoAlicia debe ser un número entero >= 0");
     }
 
-    const tratamientoCreado = await Tratamiento.create({
+    const montoMamaVal = montoMama ?? 0;
+    const montoAliciaVal = montoAlicia ?? 0;
+
+    // ✅ Si mandan cualquier monto (como antes), lo tratamos como MANUAL
+    const esManual = montoMama !== undefined || montoAlicia !== undefined;
+
+    const doc = {
       pacienteId,
       tipo,
       descripcion,
       precioPaciente,
-      montoMama: montoMama ?? 0,
-      montoAlicia: montoAlicia ?? 0,
+      montoMama: montoMamaVal,
+      montoAlicia: montoAliciaVal,
       reglaAjuste,
-    });
+      modoDistribucion: esManual ? "manual" : "auto",
+    };
+
+    // ✅ Si es auto, congelamos porcentajes usados (snapshot)
+    if (!esManual) {
+      const { porcentajeMama, porcentajeAlicia } = obtenerPorcentajesVigentesFallback();
+      doc.porcentajeMamaUsado = porcentajeMama;
+      doc.porcentajeAliciaUsado = porcentajeAlicia;
+    }
+
+    const tratamientoCreado = await Tratamiento.create(doc);
 
     return res.status(201).json(tratamientoCreado);
   } catch (error) {
@@ -98,6 +129,11 @@ export const actualizarTratamiento = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const tratamientoActual = await Tratamiento.findById(id);
+    if (!tratamientoActual) {
+      return responderNotFound(res, "Tratamiento no encontrado");
+    }
+
     const camposPermitidos = [
       "tipo",
       "descripcion",
@@ -108,6 +144,11 @@ export const actualizarTratamiento = async (req, res) => {
       "fechaInicio",
       "fechaFin",
       "estado",
+      // modoDistribucion/porcentajes los dejamos para más adelante con front,
+      // pero no rompemos nada si los mandan.
+      "modoDistribucion",
+      "porcentajeMamaUsado",
+      "porcentajeAliciaUsado",
     ];
 
     const actualizacion = {};
@@ -115,14 +156,46 @@ export const actualizarTratamiento = async (req, res) => {
       if (req.body[campo] !== undefined) actualizacion[campo] = req.body[campo];
     }
 
+    // Validaciones suaves (mantener consistencia con enteros)
+    if (actualizacion.precioPaciente !== undefined && !esEnteroNoNegativo(actualizacion.precioPaciente)) {
+      return responderBadRequest(res, "precioPaciente debe ser un número entero >= 0");
+    }
+    if (actualizacion.montoMama !== undefined && !esEnteroNoNegativo(actualizacion.montoMama)) {
+      return responderBadRequest(res, "montoMama debe ser un número entero >= 0");
+    }
+    if (actualizacion.montoAlicia !== undefined && !esEnteroNoNegativo(actualizacion.montoAlicia)) {
+      return responderBadRequest(res, "montoAlicia debe ser un número entero >= 0");
+    }
+
+    // ✅ Bloqueo: si hay pagos, no permitir cambios financieros (precio/montos/modo/porcentajes)
+    const intentoCambioFinanciero =
+      actualizacion.precioPaciente !== undefined ||
+      actualizacion.montoMama !== undefined ||
+      actualizacion.montoAlicia !== undefined ||
+      actualizacion.modoDistribucion !== undefined ||
+      actualizacion.porcentajeMamaUsado !== undefined ||
+      actualizacion.porcentajeAliciaUsado !== undefined;
+
+    if (intentoCambioFinanciero) {
+      const hayPagos = await tienePagosAsociados(id);
+      if (hayPagos) {
+        return responderBadRequest(
+          res,
+          "No se permiten cambios financieros en un tratamiento que ya tiene pagos cargados"
+        );
+      }
+    }
+
+    // ✅ Compat: si mandan montos, asumimos manual (como antes)
+    const mandaronMontos = actualizacion.montoMama !== undefined || actualizacion.montoAlicia !== undefined;
+    if (mandaronMontos && actualizacion.modoDistribucion === undefined) {
+      actualizacion.modoDistribucion = "manual";
+    }
+
     const tratamientoActualizado = await Tratamiento.findByIdAndUpdate(id, actualizacion, {
       new: true,
       runValidators: true,
     });
-
-    if (!tratamientoActualizado) {
-      return res.status(404).json({ message: "Tratamiento no encontrado" });
-    }
 
     return res.json(tratamientoActualizado);
   } catch (error) {

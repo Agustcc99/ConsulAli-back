@@ -1,17 +1,16 @@
 /**
- * Distribución por regla NUEVA con waterfall:
+ * Distribución con waterfall:
  * 1) laboratorio (se cubre primero)
  * 2) mamá
  * 3) Alicia
  *
- * Regla:
- * - precioPaciente = "bruto"
- * - laboratorio se descuenta del bruto
- * - del NETO (= precioPaciente - laboratorio) se divide 70/30
+ * Soporta 2 modos:
+ * - manual: usa montoMama/montoAlicia guardados (histórico)
+ * - auto: calcula sobre NETO (= precioPaciente - labReal) con porcentajes "congelados" en el tratamiento
  *
  * NOTA:
- * - Se usa el laboratorio REAL a partir de gastos tipo "laboratorio".
- * - Otros gastos (tipo "otro") NO se descuentan del neto para el 70/30.
+ * - labReal se calcula con gastos tipo "laboratorio"
+ * - otros gastos NO entran al neto para repartir (igual que antes)
  */
 export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
   const precioPaciente = Number(tratamiento?.precioPaciente ?? 0) || 0;
@@ -23,13 +22,66 @@ export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
 
   const totalPagado = (pagos || []).reduce((acc, p) => acc + (Number(p?.monto ?? 0) || 0), 0);
 
-  // Neto de ganancia sobre el que se reparte 70/30
+  // Neto de ganancia sobre el que se reparte (solo aplica en modo auto)
   const netoGanancia = precioPaciente - labReal;
   const netoParaRepartir = Math.max(netoGanancia, 0);
 
-  // 70/30 en enteros: redondeo para mamá, resto para Alicia
-  const objetivoMama = Math.round((netoParaRepartir * 68.42105) / 100);
-  const objetivoAlicia = netoParaRepartir - objetivoMama;
+  const modoDistribucion = String(tratamiento?.modoDistribucion || "auto");
+
+  // Si es manual, o si viene de histórico (tiene montos y no tiene porcentajes congelados),
+  // respetamos montos fijos.
+  const tienePorcentajesCongelados =
+    Number.isFinite(Number(tratamiento?.porcentajeMamaUsado)) ||
+    Number.isFinite(Number(tratamiento?.porcentajeAliciaUsado));
+
+  const montoMamaHist = Number(tratamiento?.montoMama ?? 0) || 0;
+  const montoAliciaHist = Number(tratamiento?.montoAlicia ?? 0) || 0;
+
+  const usarManual =
+    modoDistribucion === "manual" ||
+    (!tienePorcentajesCongelados && (montoMamaHist > 0 || montoAliciaHist > 0));
+
+  let objetivoMama = 0;
+  let objetivoAlicia = 0;
+
+  let porcentajeMamaUsado = null;
+  let porcentajeAliciaUsado = null;
+
+  if (usarManual) {
+    // ✅ Histórico/manual: se respeta tal cual
+    objetivoMama = Math.max(Math.round(montoMamaHist), 0);
+    objetivoAlicia = Math.max(Math.round(montoAliciaHist), 0);
+  } else {
+    // ✅ Auto: se usa porcentaje congelado si existe (snapshot),
+    // y si no existe, se cae a los defaults actuales para no romper.
+    const DEFAULT_PORC_MAMA = 68.42105;
+
+    const pm = Number(tratamiento?.porcentajeMamaUsado);
+    const pa = Number(tratamiento?.porcentajeAliciaUsado);
+
+    // Prioridad:
+    // - si viene porcentaje mamá, lo usamos; Alicia es 100 - mamá (salvo que venga explícito)
+    // - si viene solo Alicia, mamá es 100 - Alicia
+    // - si no viene ninguno, default
+    if (Number.isFinite(pm)) {
+      porcentajeMamaUsado = pm;
+      porcentajeAliciaUsado = Number.isFinite(pa) ? pa : 100 - pm;
+    } else if (Number.isFinite(pa)) {
+      porcentajeAliciaUsado = pa;
+      porcentajeMamaUsado = 100 - pa;
+    } else {
+      porcentajeMamaUsado = DEFAULT_PORC_MAMA;
+      porcentajeAliciaUsado = 100 - DEFAULT_PORC_MAMA;
+    }
+
+    // clamp suave
+    porcentajeMamaUsado = Math.min(Math.max(porcentajeMamaUsado, 0), 100);
+    porcentajeAliciaUsado = Math.min(Math.max(porcentajeAliciaUsado, 0), 100);
+
+    // Redondeo en enteros: redondeo para mamá, resto para Alicia
+    objetivoMama = Math.round((netoParaRepartir * porcentajeMamaUsado) / 100);
+    objetivoAlicia = netoParaRepartir - objetivoMama;
+  }
 
   const objetivoLab = labReal;
 
@@ -44,7 +96,7 @@ export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
 
   const pagadoAlicia = Math.min(resto2, objetivoAlicia);
 
-  // Saldos (no toco la lógica original del saldo del paciente)
+  // Saldos
   const saldoPaciente = precioPaciente - totalPagado;
 
   return {
@@ -72,11 +124,14 @@ export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
     },
 
     control: {
-      // Dejo datos útiles para debug / reportes
       precioPaciente,
-      netoGanancia,        // puede ser negativo si lab > precio
-      netoParaRepartir,    // clamp a 0
-      // compat con lo que antes existía (ya no aplica “diferencia” por montos fijos)
+      netoGanancia, // puede ser negativo si lab > precio
+      netoParaRepartir,
+      modoDistribucion: usarManual ? "manual" : "auto",
+      porcentajeMamaUsado,
+      porcentajeAliciaUsado,
+
+      // compat / debug
       sumaInternaBase: sumaInternaFinal,
       diferencia: precioPaciente - sumaInternaFinal,
     },
