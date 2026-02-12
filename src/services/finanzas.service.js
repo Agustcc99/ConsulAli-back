@@ -8,6 +8,9 @@
  * - manual: usa montoMama/montoAlicia guardados (histórico)
  * - auto: calcula sobre NETO (= precioPaciente - labReal) con porcentajes "congelados" en el tratamiento
  *
+ * ✅ FIX: En modo MANUAL, el orden real del consultorio es:
+ *    laboratorio -> Alicia -> Mamá (residuo / lo que sobra)
+ *
  * NOTA:
  * - labReal se calcula con gastos tipo "laboratorio"
  * - otros gastos NO entran al neto para repartir (igual que antes)
@@ -20,7 +23,10 @@ export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
     .filter((g) => (g?.tipo || "laboratorio") === "laboratorio")
     .reduce((acc, g) => acc + (Number(g?.monto ?? 0) || 0), 0);
 
-  const totalPagado = (pagos || []).reduce((acc, p) => acc + (Number(p?.monto ?? 0) || 0), 0);
+  const totalPagado = (pagos || []).reduce(
+    (acc, p) => acc + (Number(p?.monto ?? 0) || 0),
+    0
+  );
 
   // Neto de ganancia sobre el que se reparte (solo aplica en modo auto)
   const netoGanancia = precioPaciente - labReal;
@@ -48,11 +54,11 @@ export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
   let porcentajeAliciaUsado = null;
 
   if (usarManual) {
-    // ✅ Histórico/manual: se respeta tal cual
+    // Histórico/manual: se respeta tal cual
     objetivoMama = Math.max(Math.round(montoMamaHist), 0);
     objetivoAlicia = Math.max(Math.round(montoAliciaHist), 0);
   } else {
-    // ✅ Auto: se usa porcentaje congelado si existe (snapshot),
+    // Auto: se usa porcentaje congelado si existe (snapshot),
     // y si no existe, se cae a los defaults actuales para no romper.
     const DEFAULT_PORC_MAMA = 68.42105;
 
@@ -87,14 +93,32 @@ export function calcularDistribucionFija(tratamiento, gastos = [], pagos = []) {
 
   const sumaInternaFinal = objetivoLab + objetivoMama + objetivoAlicia;
 
-  // Waterfall (secuencial): lab -> mamá -> Alicia
-  const pagadoLab = Math.min(totalPagado, objetivoLab);
-  const resto1 = Math.max(totalPagado - pagadoLab, 0);
+  // ✅ Waterfall:
+  // - AUTO: lab -> mamá -> Alicia (se mantiene para no tocar históricos auto)
+  // - MANUAL: lab -> Alicia -> mamá (fix para tu regla real y pendientes falsos)
+  let pagadoLab = 0;
+  let pagadoMama = 0;
+  let pagadoAlicia = 0;
 
-  const pagadoMama = Math.min(resto1, objetivoMama);
-  const resto2 = Math.max(resto1 - pagadoMama, 0);
+  if (usarManual) {
+    // ✅ MANUAL: lab -> Alicia -> mamá
+    pagadoLab = Math.min(totalPagado, objetivoLab);
+    const resto1 = Math.max(totalPagado - pagadoLab, 0);
 
-  const pagadoAlicia = Math.min(resto2, objetivoAlicia);
+    pagadoAlicia = Math.min(resto1, objetivoAlicia);
+    const resto2 = Math.max(resto1 - pagadoAlicia, 0);
+
+    pagadoMama = Math.min(resto2, objetivoMama);
+  } else {
+    // 🔒 AUTO: lab -> mamá -> Alicia (como estaba)
+    pagadoLab = Math.min(totalPagado, objetivoLab);
+    const resto1 = Math.max(totalPagado - pagadoLab, 0);
+
+    pagadoMama = Math.min(resto1, objetivoMama);
+    const resto2 = Math.max(resto1 - pagadoMama, 0);
+
+    pagadoAlicia = Math.min(resto2, objetivoAlicia);
+  }
 
   // Saldos
   const saldoPaciente = precioPaciente - totalPagado;
